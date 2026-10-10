@@ -1,13 +1,13 @@
 # Kerb back end
 
-Express + TypeScript API for Kerb on Supabase Postgres, built to the shared API contract in the team plan.
+Express + TypeScript API for Kerb, built to the shared API contract in the team plan. Data lives in a built-in Postgres (PGlite) saved to `backend/.data`, or any Postgres via `DATABASE_URL`.
 
 - **Stripe Checkout** places a hold at booking; only what was used is captured and the rest released.
 - **Stripe Connect** pays hosts daily as destination charges, with Kerb's 12% taken as the application fee.
 - **Stripe Identity** checks a government ID (passport, driving licence or national ID card) plus a matching
   selfie before anyone can book a charger or list one.
 - **Stripe Radar** screens every card; risk levels show on the host's dashboard.
-- **Supabase Auth** handles sign-in (email magic links) on the front end; the back end verifies its tokens.
+- **Sign-in** is built in: email in, signed token out. No passwords; Stripe Identity is what establishes trust.
 - **OpenRouter** reads electricity bills and parses plain-English availability.
 
 ## Run it
@@ -16,7 +16,7 @@ Full beginner steps for Windows are in [`docs/SETUP-WINDOWS.md`](../docs/SETUP-W
 
 ```bash
 npm install
-cp .env.example .env        # fill in Supabase, Stripe and OpenRouter values
+cp .env.example .env        # fill in Stripe and OpenRouter values
 npm run stripe:demo-host    # once: creates the sandbox host account the seeded chargers pay
 npm run dev                 # http://localhost:4000; creates tables and seeds 12 chargers on first run
 npm run stripe:listen       # second terminal: forwards Stripe webhooks to your laptop
@@ -25,11 +25,11 @@ npm test                    # end-to-end tests on an in-memory Postgres with a f
 
 ## How the front end talks to it
 
-Sign in with Supabase on the front end (`supabase.auth.signInWithOtp({ email })`), then send the session's
-access token on every call that needs a user:
+Sign in with `POST /api/auth/login { email }`, which returns `{ token, userId, email }`. Keep the token
+(e.g. in localStorage) and send it on every call that needs a user:
 
 ```
-Authorization: Bearer <session.access_token>
+Authorization: Bearer <token>
 ```
 
 Browsing chargers needs no sign-in. Booking and listing need a verified ID:
@@ -47,6 +47,7 @@ Error codes: `invalid_input`, `charger_not_found`, `slot_taken`, `booking_not_ac
 | --- | --- | --- |
 | `GET /api/chargers?lat&lng&radiusKm&from&to` | none | With `from`/`to`, only chargers open and free for that slot |
 | `GET /api/chargers/:id` | none | |
+| `POST /api/auth/login` | none | `{ email }` → `{ token, userId, email }` |
 | `GET /api/me` | signed in | `{ userId, email, identityStatus, hostId }` |
 | `POST /api/me/verify` | signed in | Starts Stripe Identity → `{ identityStatus, url }` |
 | `POST /api/hosts` | signed in | `{ name, hostType }` → `{ hostId, onboardingUrl }` (Stripe Connect) |

@@ -10,16 +10,15 @@ export const config = {
   get frontendUrl() {
     return this.frontendUrls[0];
   },
-  // Empty = built-in database saved in localDataDir (laptop demo). Set it to use Supabase Postgres.
+  // Empty = built-in database saved in localDataDir (laptop demo). Set it to use an external Postgres.
   databaseUrl: process.env.DATABASE_URL ?? "",
   localDataDir: process.env.LOCAL_DATA_DIR ?? "./.data",
   stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
   // Sandbox connected account that receives payouts for the seeded chargers.
   stripeDemoAccountId: process.env.STRIPE_DEMO_ACCOUNT_ID ?? "",
-  supabaseUrl: process.env.SUPABASE_URL ?? "",
-  // Only for Supabase projects still on the legacy shared JWT secret; otherwise JWKS is used.
-  supabaseJwtSecret: process.env.SUPABASE_JWT_SECRET ?? "",
+  // Signs the sign-in tokens the back end hands out. Any long random string.
+  authSecret: process.env.AUTH_SECRET ?? "kerb-local-demo-secret-change-me-in-production",
   openRouterKey: process.env.OPENROUTER_API_KEY ?? "",
   openRouterModel: process.env.OPENROUTER_MODEL ?? "google/gemini-2.5-flash",
   openRouterCompareModel: process.env.OPENROUTER_COMPARE_MODEL ?? "anthropic/claude-sonnet-4.5",
@@ -31,7 +30,6 @@ export function assertConfig() {
   const missing = [
     ["STRIPE_SECRET_KEY", config.stripeSecretKey],
     ["STRIPE_WEBHOOK_SECRET", config.stripeWebhookSecret],
-    ["SUPABASE_URL", config.supabaseUrl],
   ].filter(([, v]) => !v).map(([k]) => k);
   if (missing.length) {
     throw new Error(`Missing environment variables: ${missing.join(", ")}. See backend/.env.example.`);

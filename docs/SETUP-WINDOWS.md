@@ -4,7 +4,7 @@ This assumes you know nothing. Follow it top to bottom. Each step says what you'
 
 ## What you're setting up, in one paragraph
 
-The **back end** is a small program that runs on your laptop. The front end (King's app) talks to it at `http://localhost:4000` (`localhost` means "this computer"). The back end needs a few secrets to talk to outside services: a **Supabase database address and project URL** (where data is stored and how sign-ins are checked), a **Stripe secret key** (so it can take test payments and check IDs), a **Stripe webhook secret** (so it can trust messages Stripe sends back), and an **OpenRouter key** (so it can use AI). You'll get each one, put them in a file called `.env`, and start the program.
+The **back end** is a small program that runs on your laptop. The front end (King's app) talks to it at `http://localhost:4000` (`localhost` means "this computer"). The back end needs a few secrets to talk to outside services: a **Stripe secret key** (so it can take test payments and check IDs), a **Stripe webhook secret** (so it can trust messages Stripe sends back), and an **OpenRouter key** (so it can use AI). You'll get each one, put them in a file called `.env`, and start the program.
 
 You'll use **two terminal windows** at the end. A terminal is the black window where you type commands. On Windows, open one by pressing the Windows key, typing `cmd`, and pressing Enter. That's "Command Prompt".
 
@@ -92,16 +92,6 @@ OpenRouter gives the back end access to AI models. It's used to read electricity
 
 Now **save the file in Notepad** (Ctrl+S). Leave `STRIPE_WEBHOOK_SECRET=` empty for now.
 
-## Step 6a: Set up Supabase sign-in
-
-Supabase handles sign-in with email links. The back end only needs your project's address to check those sign-ins. (Data is stored in a built-in database on your laptop, in `backend/.data`, so there's no database to set up.)
-
-1. Go to [supabase.com](https://supabase.com), sign in, create an organisation (Free plan), then a project named `kerb` in region **West EU (Ireland)**.
-2. Click **Connect** at the top, open the **App Frameworks** tab, and copy the URL from the `NEXT_PUBLIC_SUPABASE_URL=` line (like `https://abcd.supabase.co`).
-3. In Notepad, paste it after `SUPABASE_URL=`. Leave `DATABASE_URL=` empty.
-4. Give King both `NEXT_PUBLIC_SUPABASE_...` lines for the front end.
-5. Go to **Authentication > Sign In / Providers** and check **Email** is enabled.
-
 ## Step 6b: Turn on Stripe Identity
 
 Stripe Identity checks a driver's or host's government ID (passport, driving licence or national ID card) and a selfie.
@@ -160,14 +150,14 @@ The 12 sample chargers need a Stripe account to pay their hosts. This creates on
    ```
    {"ok":true,"ai":true}
    ```
-   - The page loading at all means the database, Stripe and Supabase settings worked, because the back end refuses to start without them.
+   - The page loading at all means the Stripe settings worked, because the back end refuses to start without them.
    - `ai: true` means the OpenRouter key loaded.
 
 ## Step 11: Test the whole flow
 
-Booking now needs a signed-in, ID-verified user, which comes from King's front end (Supabase sign-in, then the Stripe Identity page). Once the front end has sign-in, try this:
+Booking needs a signed-in, ID-verified user, which comes from King's front end (email sign-in, then the Stripe Identity page). Once the front end has sign-in, try this:
 
-1. Sign in on the front end with your email and click the link Supabase emails you.
+1. Sign in on the front end with your email.
 2. Start ID verification. On Stripe's test page, choose the option to simulate a successful verification.
 3. Book a charger. On Stripe Checkout, pay with card `4242 4242 4242 4242`, any future expiry (e.g. `12/30`), any CVC and any postcode.
 4. Watch terminal 2: you'll see `checkout.session.completed` arrive, and the booking turns **Reserved**.
