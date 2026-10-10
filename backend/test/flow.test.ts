@@ -5,7 +5,6 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import type { Server } from "node:http";
 import { PGlite } from "@electric-sql/pglite";
-import { SignJWT } from "jose";
 import { useDriver, migrate } from "../src/db.js";
 import { usePayments, type Payments } from "../src/payments.js";
 
@@ -49,9 +48,16 @@ before(async () => {
 });
 after(() => server.close());
 
-const tokenFor = (sub: string) =>
-  new SignJWT({ email: `${sub}@example.com` }).setProtectedHeader({ alg: "HS256" }).setSubject(sub)
-    .setAudience("authenticated").setExpirationTime("1h").sign(new TextEncoder().encode(process.env.SUPABASE_JWT_SECRET));
+const tokens: Record<string, { token: string; userId: string }> = {};
+async function login(who: string) {
+  if (!tokens[who]) {
+    const res = await fetch(`${base}/auth/login`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email: `${who}@example.com` }) });
+    tokens[who] = await res.json();
+  }
+  return tokens[who];
+}
+const tokenFor = async (who: string) => (await login(who)).token;
+const userId = async (who: string) => (await login(who)).userId;
 
 async function call(method: string, path: string, body?: unknown, who?: string) {
   const headers: Record<string, string> = {};
@@ -73,7 +79,8 @@ const pay = (bookingId: string, pi = `pi_${bookingId}`) =>
 
 async function verify(who: string) {
   await call("POST", "/me/verify", {}, who);
-  await webhook("identity.verification_session.verified", { id: `vs_${who}`, metadata: { userId: who } });
+  const id = await userId(who);
+  await webhook("identity.verification_session.verified", { id: `vs_${id}`, metadata: { userId: id } });
 }
 
 // Phibsborough is open 24/7, so slots relative to now always fit.
@@ -95,7 +102,8 @@ test("booking needs sign-in and a verified ID", async () => {
   const v = await call("POST", "/me/verify", {}, "alice");
   assert.match(v.body.url, /verify\.stripe\.test/);
   assert.equal((await call("GET", "/me", undefined, "alice")).body.identityStatus, "processing");
-  await webhook("identity.verification_session.verified", { id: "vs_alice", metadata: { userId: "alice" } });
+  const aliceId = await userId("alice");
+  await webhook("identity.verification_session.verified", { id: `vs_${aliceId}`, metadata: { userId: aliceId } });
   assert.equal((await call("GET", "/me", undefined, "alice")).body.identityStatus, "verified");
 });
 

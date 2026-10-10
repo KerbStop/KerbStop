@@ -1,4 +1,4 @@
-// Postgres access (Supabase in production). Every query goes through `q`, and
+// Postgres access (built-in on a laptop, or any Postgres via DATABASE_URL). Every query goes through `q`, and
 // multi-step changes through `tx`, so tests can swap in an in-memory Postgres.
 import pg from "pg";
 import { PGlite } from "@electric-sql/pglite";
@@ -17,7 +17,7 @@ let driver: Driver | null = null;
 function pgDriver(): Driver {
   const pool = new pg.Pool({
     connectionString: config.databaseUrl,
-    // Supabase requires TLS; local Postgres usually doesn't have it.
+    // Hosted Postgres requires TLS; local Postgres usually doesn't have it.
     ssl: /localhost|127\.0\.0\.1/.test(config.databaseUrl) ? undefined : { rejectUnauthorized: false },
     max: 5,
   });
@@ -79,7 +79,7 @@ export const newId = (prefix: string) => `${prefix}_${crypto.randomUUID().replac
 
 export const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users (
-  id TEXT PRIMARY KEY,                       -- Supabase auth user id
+  id TEXT PRIMARY KEY,
   email TEXT NOT NULL,
   identity_status TEXT NOT NULL DEFAULT 'unverified',
   identity_session_id TEXT,

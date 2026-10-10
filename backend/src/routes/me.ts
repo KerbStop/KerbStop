@@ -1,7 +1,16 @@
 import { Router } from "express";
-import { requireUser } from "../auth.js";
+import { z } from "zod";
+import { requireUser, signIn } from "../auth.js";
 import { one, q } from "../db.js";
 import { payments } from "../payments.js";
+
+export const auth = Router();
+
+/** POST /api/auth/login { email } -> { token, userId, email } */
+auth.post("/login", async (req, res) => {
+  const { email } = z.object({ email: z.email() }).parse(req.body);
+  res.json(await signIn(email));
+});
 
 export const me = Router();
 me.use(requireUser);

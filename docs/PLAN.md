@@ -23,19 +23,19 @@ reviewed, tested and demoed on their own.
 
 ## Still to do
 
-- Sean: create the Supabase project, turn on Stripe Identity, run `npm run stripe:demo-host` (see `docs/SETUP-WINDOWS.md`).
+- Sean: run `npm run stripe:demo-host` (see `docs/SETUP-WINDOWS.md`).
 - Run the full loop against the real Stripe sandbox once the front end has sign-in.
 - Build the 10 to 15 bill test set and run `npm run ai:compare`.
 - Deploy to Render when Sean says go.
 - Smart search (stretch): not started. "Verified drivers only" is now always on.
-- Front end: King's, now with Supabase sign-in and the ID verification step.
+- Front end: King's, now with email sign-in and the ID verification step.
 
 ## Decisions (from Sean, 10 Oct)
 
 | # | Question | Decision |
 | --- | --- | --- |
 | 1 | Where it runs | Deployed to Render (`render.yaml`); deploy happens once Sean says go |
-| 2 | Database | Supabase Postgres |
+| 2 | Database | Built-in Postgres (PGlite) saved on the laptop; `DATABASE_URL` switches to hosted Postgres for deploying (changed from Supabase at Sean's request) |
 | 3 | Repo layout | One repo, `backend/` and `frontend/` side by side |
 | 4 | Mock payments | Removed: Stripe sandbox only |
 | 5 | Seeded hosts | One sandbox "Kerb Demo Host" Connect account receives all seeded chargers' payouts, so every demo booking is a destination charge showing the host's share and Kerb's fee |
@@ -43,5 +43,5 @@ reviewed, tested and demoed on their own.
 | 7 | AI confidence | Number from 0 to 1; under 0.6 means "please check" |
 | 8 | Second AI model | Claude via OpenRouter (`OPENROUTER_COMPARE_MODEL`), compared with `npm run ai:compare` |
 | 9 | Charger defaults | Kept: 10c a minute overstay after 10 minutes' grace; 60× simulated clock |
-| 10 | Accounts | Supabase Auth email magic links; Stripe Identity checks a government ID plus a selfie for drivers (before booking) and hosts (before listing) |
+| 10 | Accounts | Built-in email sign-in (no Supabase); Stripe Identity checks a government ID plus a selfie for drivers (before booking) and hosts (before listing) |
 | 11 | Contract extras | Accepted; documented in `backend/README.md` |
