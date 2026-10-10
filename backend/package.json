@@ -8,7 +8,8 @@
     "test": "tsx --test test/*.test.ts",
     "stripe:listen": "stripe listen --events checkout.session.completed,checkout.session.expired,payment_intent.payment_failed,payment_intent.canceled,identity.verification_session.verified,identity.verification_session.requires_input,identity.verification_session.processing,identity.verification_session.canceled,account.updated --forward-to localhost:4000/api/webhooks/stripe",
     "stripe:demo-host": "tsx scripts/demo-host.ts",
-    "ai:compare": "tsx scripts/compare-models.ts"
+    "ai:compare": "tsx scripts/compare-models.ts",
+    "demo:book": "tsx scripts/demo-book.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8",
