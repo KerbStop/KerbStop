@@ -1,6 +1,7 @@
 // Postgres access (Supabase in production). Every query goes through `q`, and
 // multi-step changes through `tx`, so tests can swap in an in-memory Postgres.
 import pg from "pg";
+import { PGlite } from "@electric-sql/pglite";
 import { config } from "./config.js";
 
 export type Row = Record<string, any>;
@@ -44,8 +45,21 @@ export function useDriver(d: Driver) {
   driver = d;
 }
 
+/**
+ * No DATABASE_URL: run Postgres inside the app (PGlite), saved to backend/.data so
+ * bookings survive restarts. Fine for a laptop demo; use a real DATABASE_URL to deploy.
+ */
+function localDriver(): Driver {
+  const db = new PGlite(config.localDataDir);
+  return {
+    query: (text, params) => db.query(text, params as any[]),
+    transaction: (fn) => db.transaction((t) => fn({ query: (s, p) => t.query(s, p as any[]) })),
+    exec: (sql) => db.exec(sql),
+  };
+}
+
 function current(): Driver {
-  return (driver ??= pgDriver());
+  return (driver ??= config.databaseUrl ? pgDriver() : localDriver());
 }
 
 export async function q<T = Row>(text: string, params: unknown[] = []): Promise<T[]> {
