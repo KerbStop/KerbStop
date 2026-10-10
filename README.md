@@ -6,6 +6,7 @@ Rent out idle EV chargers by the hour. HackUCD 2026.
 | --- | --- |
 | `backend/` | Express + TypeScript + SQLite API, Stripe Connect and Checkout holds, OpenRouter AI. See `backend/README.md`. |
 | `frontend/` | King's React app (not here yet) |
+| `docs/SETUP-WINDOWS.md` | Beginner setup guide for running the back end on Windows |
 | `docs/PLAN.md` | How the back end is split into portions, what's done, and open design questions |
 
 ```bash
