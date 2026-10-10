@@ -13,7 +13,7 @@ import { slotFitsAvailability } from "./availability.js";
 import { slotIsTaken } from "./slots.js";
 
 const MAX_DAYS_AHEAD = 6; // card holds last about 7 days
-const START_EARLY_MIN = 15;
+const START_EARLY_MIN = 30; // the next half-hour slot can always start straight away
 
 async function mustGetCharger(id: string): Promise<ChargerRow> {
   const row = await getChargerRow(id);

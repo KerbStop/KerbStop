@@ -1,12 +1,23 @@
 import { Activity, ArrowRight, CalendarDays, Clock3, MapPin, Plus, TrendingUp, Wallet, Zap } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { getHost } from '../lib/api';
+import type { HostSummary } from '../lib/api';
+import { formatCurrencyFromCents } from '../lib/format';
 import { loadMockHostState, startFreshMockHostListing } from '../lib/mockHostService';
 import type { MockHostState } from '../lib/mockHostService';
 
 export function HostDashboardPage() {
   const navigate = useNavigate();
   const [host, setHost] = useState<MockHostState>(loadMockHostState);
+  const [summary, setSummary] = useState<HostSummary | null>(null);
+
+  useEffect(() => {
+    if (!host.hostId) return;
+    getHost(host.hostId).then(setSummary).catch(() => undefined);
+  }, [host.hostId]);
+
+  const upcoming = summary?.bookings.filter((booking) => ['reserved', 'charging', 'pending_payment'].includes(booking.status)) ?? [];
   const availableDays = Object.entries(host.availability)
     .filter(([, available]) => available)
     .map(([day]) => day);
@@ -32,17 +43,17 @@ export function HostDashboardPage() {
     <div className="dashboard-page container host-dashboard">
       <div className="host-dashboard-heading">
         <div>
-          <span className="eyebrow">Host dashboard · Demo</span>
+          <span className="eyebrow">Host dashboard</span>
           <h1>Welcome, {host.fullName.split(' ')[0] || 'host'}.</h1>
-          <p>Your charger listing is live in this browser demo.</p>
+          <p>Your charger is live on the KerbStop map.</p>
         </div>
         <button type="button" className="secondary-action" onClick={handleStartAnother}><Plus size={16} /> Add another charger</button>
       </div>
 
       <div className="dashboard-grid">
-        <div className="metric-card"><Activity size={20} /><span>Demo earnings</span><strong>€0.00</strong><small>No bookings yet</small></div>
-        <div className="metric-card"><CalendarDays size={20} /><span>Upcoming bookings</span><strong>0</strong><small>Ready when your first driver books</small></div>
-        <div className="metric-card"><TrendingUp size={20} /><span>Payout setup</span><strong>{host.stripeConnected ? 'Connected' : 'Not connected'}</strong><small>Mock Stripe Connect status</small></div>
+        <div className="metric-card"><Activity size={20} /><span>Earnings</span><strong>{formatCurrencyFromCents(summary?.earningsCents ?? 0)}</strong><small>Your share after KerbStop&apos;s 12%</small></div>
+        <div className="metric-card"><CalendarDays size={20} /><span>Upcoming bookings</span><strong>{upcoming.length}</strong><small>{upcoming.length ? 'Drivers have reserved your charger' : 'Ready when your first driver books'}</small></div>
+        <div className="metric-card"><TrendingUp size={20} /><span>Payouts</span><strong>{summary?.payoutsEnabled ? 'Enabled' : host.stripeConnected ? 'Being checked' : 'Not connected'}</strong><small>Stripe Connect status</small></div>
       </div>
 
       <div className="host-dashboard-content">
@@ -70,12 +81,11 @@ export function HostDashboardPage() {
         <section className="host-card host-dashboard-payouts">
           <div className="card-icon"><Wallet size={20} /></div>
           <h2>Payout account</h2>
-          <p>{host.stripeConnected ? 'Mock payout connection complete. Real Stripe Connect will be added later.' : 'Connect payouts when Stripe Connect is ready.'}</p>
-          <span className={host.stripeConnected ? 'host-verified' : 'host-pending'}>{host.stripeConnected ? 'Demo connected' : 'Setup pending'}</span>
+          <p>{summary?.payoutsEnabled ? 'Stripe pays your share after every session.' : 'Stripe is still checking your details. Payouts start once it finishes.'}</p>
+          <span className={summary?.payoutsEnabled ? 'host-verified' : 'host-pending'}>{summary?.payoutsEnabled ? 'Payouts enabled' : 'Setup pending'}</span>
         </section>
       </div>
 
-      <p className="host-dashboard-demo-note">Dashboard metrics and listing publication are simulated and stored in this browser only.</p>
     </div>
   );
 }

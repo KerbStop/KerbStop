@@ -3,11 +3,10 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ErrorState } from '../components/ErrorState';
 import { LoadingState } from '../components/LoadingState';
-import { getChargerById } from '../lib/api';
+import { getBooking, getChargerById, getMeter, stopCharging } from '../lib/api';
+import type { MeterReading } from '../lib/api';
 import { formatCurrencyFromCents } from '../lib/format';
-import { getBooking, getMeter, stopCharging } from '../lib/mockBookingService';
-import type { MockBookingRecord, MockMeterReading } from '../lib/mockBookingService';
-import type { Charger } from '../types';
+import type { Booking, Charger } from '../types';
 
 function formatElapsedTime(totalSeconds: number) {
   const hours = Math.floor(totalSeconds / 3600);
@@ -19,9 +18,9 @@ function formatElapsedTime(totalSeconds: number) {
 export function ChargingPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [booking, setBooking] = useState<MockBookingRecord | null>(null);
+  const [booking, setBooking] = useState<Booking | null>(null);
   const [charger, setCharger] = useState<Charger | null>(null);
-  const [meter, setMeter] = useState<MockMeterReading | null>(null);
+  const [meter, setMeter] = useState<MeterReading | null>(null);
   const [loading, setLoading] = useState(true);
   const [pending, setPending] = useState(false);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
@@ -36,7 +35,6 @@ export function ChargingPage() {
     let mounted = true;
     void getBooking(id)
       .then(async (savedBooking) => {
-        if (!savedBooking) throw new Error('This charging session could not be found.');
         if (savedBooking.status === 'completed') {
           navigate(`/receipt/${id}`, { replace: true });
           return;
@@ -71,7 +69,10 @@ export function ChargingPage() {
     const refreshMeter = () => {
       void getMeter(booking.id)
         .then((reading) => {
-          if (mounted) setMeter(reading);
+          if (!mounted) return;
+          setMeter(reading);
+          // The hold is used up: the back end stopped the session and captured the payment.
+          if (reading.status === 'completed') navigate(`/receipt/${booking.id}`);
         })
         .catch((meterError) => {
           if (mounted) setError(meterError instanceof Error ? meterError.message : 'The meter could not be refreshed.');
@@ -84,7 +85,7 @@ export function ChargingPage() {
       mounted = false;
       window.clearInterval(interval);
     };
-  }, [booking]);
+  }, [booking, navigate]);
 
   const handleStopCharging = async () => {
     if (!id) return;
@@ -110,7 +111,8 @@ export function ChargingPage() {
   }
   if (!booking || !charger) return <ErrorState message="We could not find this charging session." />;
 
-  const estimatedSessionKwh = charger.powerKw * booking.durationHours;
+  const durationHours = (new Date(booking.end).getTime() - new Date(booking.start).getTime()) / 3_600_000;
+  const estimatedSessionKwh = charger.powerKw * durationHours;
   const chargeProgress = Math.min(100, (meter?.kwhDelivered ?? 0) / estimatedSessionKwh * 100);
 
   return (
@@ -134,21 +136,21 @@ export function ChargingPage() {
 
         <div className="live-cost-row">
           <span>Energy used</span>
-          <strong>{formatCurrencyFromCents(meter?.energyCents ?? 0)}</strong>
+          <strong>{formatCurrencyFromCents(meter?.runningCostCents ?? 0)}</strong>
         </div>
-        <p className="live-session-time"><Clock3 size={16} /> Session time <strong>{formatElapsedTime(meter?.elapsedSeconds ?? 0)}</strong></p>
+        <p className="live-session-time"><Clock3 size={16} /> Session time <strong>{formatElapsedTime((meter?.elapsedMinutes ?? 0) * 60)}</strong></p>
 
         <div className="charging-detail-grid">
           <div><Zap size={16} /><span>Charger</span><strong>{charger.powerKw} kW · {charger.connector}</strong></div>
           <div><MapPin size={16} /><span>Location</span><strong>{charger.area}, Dublin</strong></div>
           <div><Gauge size={16} /><span>Maximum hold</span><strong>{formatCurrencyFromCents(booking.holdCents)}</strong></div>
-          <div><Clock3 size={16} /><span>Session limit</span><strong>{booking.durationHours} {booking.durationHours === 1 ? 'hour' : 'hours'}</strong></div>
+          <div><Clock3 size={16} /><span>Session limit</span><strong>{durationHours} {durationHours === 1 ? 'hour' : 'hours'}</strong></div>
         </div>
 
         <div className="charging-progress-track" aria-label={`${Math.round(chargeProgress)} percent of estimated session energy delivered`}>
           <span style={{ width: `${chargeProgress}%` }} />
         </div>
-        <p className="charging-demo-note">Live meter is simulated for this demo and updates every second. No charger is connected.</p>
+        <p className="charging-demo-note">Demo meter: the charger's clock runs 60 times faster, so one real minute is one hour of charging.</p>
       </section>
 
       <Link to={`/booking/${id}`} className="charging-back-link">Booking details</Link>
@@ -157,7 +159,7 @@ export function ChargingPage() {
         <div className="stop-confirm-backdrop">
           <section className="stop-confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="stop-dialog-title">
             <h2 id="stop-dialog-title">Stop charging?</h2>
-            <p>We&apos;ll calculate your final energy cost and release any unused hold.</p>
+            <p>Stripe will capture only what you used and release the rest of the hold.</p>
             <div className="booking-actions">
               <button type="button" className="secondary-action" onClick={() => setShowStopConfirm(false)} disabled={pending}>
                 Keep charging

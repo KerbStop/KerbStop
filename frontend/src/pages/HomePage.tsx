@@ -57,7 +57,7 @@ export function HomePage() {
         <div className="footer-right">
           Dublin, Ireland
           <br />
-          Front-end demo · No live payments
+          Stripe test mode · No real money
         </div>
       </footer>
     </div>

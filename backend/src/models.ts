@@ -15,6 +15,8 @@ export type Charger = {
   connector: "Type 2" | "CCS";
   powerKw: number;
   priceCentsPerKwh: number;
+  /** The host's own price before Kerb's 12% fee, so the front end can quote the exact hold. */
+  hostPriceCentsPerKwh: number;
   overstayCentsPerMin: number;
   graceMinutes: number;
   availability: Window[];
@@ -87,6 +89,7 @@ export function toCharger(r: ChargerRow): Charger {
     connector: r.connector as Charger["connector"],
     powerKw: r.power_kw,
     priceCentsPerKwh: driverPriceCentsPerKwh(r.host_price_cents_per_kwh),
+    hostPriceCentsPerKwh: r.host_price_cents_per_kwh,
     overstayCentsPerMin: r.overstay_cents_per_min,
     graceMinutes: r.grace_minutes,
     availability: r.availability,

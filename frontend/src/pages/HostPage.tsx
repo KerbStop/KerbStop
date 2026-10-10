@@ -22,13 +22,17 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { HostAvailabilityCalendar } from '../components/HostAvailabilityCalendar';
+import { becomeHost, getMe, publishCharger, readBill, signIn, startIdentityCheck } from '../lib/api';
 import {
+  areaToLatLng,
   hostOnboardingSteps,
   loadMockHostState,
+  toAvailabilityWindows,
   updateMockHostState,
 } from '../lib/mockHostService';
+import { rememberAfterVerify, useSignedInEmail } from '../lib/session';
 import type { HostDay, MockHostState } from '../lib/mockHostService';
 
 const weekdays: HostDay[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -36,13 +40,93 @@ const weekdays: HostDay[] = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 export function HostPage() {
   const navigate = useNavigate();
   const [host, setHost] = useState<MockHostState>(loadMockHostState);
-  const [password, setPassword] = useState('');
   const [photoPreviews, setPhotoPreviews] = useState<string[]>([]);
   const [stepError, setStepError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const signedInEmail = useSignedInEmail();
   const stepIndex = hostOnboardingSteps.findIndex((step) => step.key === host.step);
   const progress = Math.round((stepIndex / (hostOnboardingSteps.length - 1)) * 100);
 
   useEffect(() => () => photoPreviews.forEach((url) => URL.revokeObjectURL(url)), [photoPreviews]);
+
+  // Back from Stripe Identity or Stripe Connect: pick up where the host left off.
+  useEffect(() => {
+    if (!signedInEmail) return;
+    void getMe().then((me) => {
+      setHost((current) => updateMockHostState(current, {
+        email: current.email || me.email,
+        accountCreated: true,
+        identityVerified: me.identityStatus === 'verified',
+        hostId: current.hostId || me.hostId || '',
+      }));
+    }).catch(() => undefined);
+  }, [signedInEmail]);
+
+  useEffect(() => {
+    if (searchParams.get('onboarding') !== 'done') return;
+    setHost((current) => updateMockHostState(current, { stripeConnected: true, step: 'payouts' }));
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams]);
+
+  const runBusy = async (work: () => Promise<void>, fallback: string) => {
+    setBusy(true);
+    setStepError('');
+    try {
+      await work();
+    } catch (failure) {
+      setStepError(failure instanceof Error ? failure.message : fallback);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleIdentityCheck = () => runBusy(async () => {
+    rememberAfterVerify('/host');
+    const url = await startIdentityCheck();
+    if (url) window.location.assign(url);
+    else patchHost({ identityVerified: true });
+  }, 'Could not start the ID check.');
+
+  const handleBillFile = (file: File | undefined) => {
+    patchHost({ billFileName: file?.name ?? '', billAnalyzed: false });
+    if (!file || !file.type.startsWith('image/')) return;
+    void runBusy(async () => {
+      const reading = await readBill(file);
+      if (reading.dayRateCents === null) throw new Error(reading.notes || 'That doesn’t look like an electricity bill. Try a clearer photo.');
+      patchHost({
+        billFileName: file.name,
+        billAnalyzed: true,
+        electricityRateCents: reading.dayRateCents,
+        billConfidence: Math.round(reading.confidence * 100),
+        priceCentsPerKwh: reading.suggestedPriceCents ?? host.priceCentsPerKwh,
+      });
+    }, 'The bill reader could not read that file.');
+  };
+
+  const handleConnectStripe = () => runBusy(async () => {
+    const { hostId, onboardingUrl } = await becomeHost(host.fullName || host.email, host.hostKind);
+    setHost((current) => updateMockHostState(current, { hostId }));
+    window.location.assign(onboardingUrl);
+  }, 'Could not open Stripe Connect.');
+
+  const handlePublish = () => runBusy(async () => {
+    let hostId = host.hostId;
+    if (!hostId) hostId = (await becomeHost(host.fullName || host.email, host.hostKind)).hostId;
+    const charger = await publishCharger({
+      hostId,
+      title: host.chargerName.trim(),
+      ...areaToLatLng(host.area),
+      area: host.area.trim(),
+      connector: host.connector,
+      powerKw: host.powerKw,
+      // The price the host typed includes Kerb's 12% fee; the back end stores the host's share.
+      hostPriceCentsPerKwh: Math.max(1, Math.round(host.priceCentsPerKwh / 1.12)),
+      availability: toAvailabilityWindows(host),
+    });
+    setHost(updateMockHostState(host, { hostId, published: true, listingId: charger.id, publishedAt: new Date().toISOString() }));
+    navigate('/host/dashboard');
+  }, 'Could not publish the listing.');
 
   const patchHost = (changes: Partial<MockHostState>) => {
     setHost((current) => updateMockHostState(current, changes));
@@ -69,26 +153,21 @@ export function HostPage() {
     switch (host.step) {
       case 'access': {
         if (!host.email.includes('@')) return setStepError('Enter a valid email address to continue.');
-        if (host.authMode === 'login') {
-          if (password.length < 8) return setStepError('Enter your demo password to continue.');
-          advanceTo('account');
-        } else {
-          advanceTo('account');
-        }
+        if (signedInEmail === host.email.trim().toLowerCase()) return advanceTo('account');
+        void runBusy(async () => {
+          const me = await signIn(host.email);
+          patchHost({ step: 'account', identityVerified: me.identityStatus === 'verified', hostId: me.hostId ?? '' });
+        }, 'Sign-in failed.');
         return;
       }
       case 'account':
         if (!host.fullName.trim() || host.phone.replace(/\D/g, '').length < 7) {
           return setStepError('Add your name and a valid phone number to continue.');
         }
-        if (host.authMode === 'signup' && password.length < 8) {
-          return setStepError('Use at least 8 characters for this demo account.');
-        }
         patchHost({ accountCreated: true, step: 'identity' });
-        setPassword('');
         return;
       case 'identity':
-        if (!host.identityVerified) return setStepError('Run the demo identity check to continue.');
+        if (!host.identityVerified) return setStepError('Verify your ID with Stripe to continue.');
         break;
       case 'contact':
         if (!host.contactVerified) return setStepError('Verify your email and phone in this demo to continue.');
@@ -108,7 +187,7 @@ export function HostPage() {
         if (host.photoCount < 1) return setStepError('Add at least one charger photo to continue.');
         break;
       case 'bill':
-        if (!host.billAnalyzed) return setStepError('Run the demo electricity bill reader to continue.');
+        if (!host.billAnalyzed) return setStepError('Upload a photo of your bill, or use the sample bill, to continue.');
         break;
       case 'price':
         if (host.priceCentsPerKwh < 1 || host.priceCentsPerKwh > 200) {
@@ -121,19 +200,11 @@ export function HostPage() {
         }
         break;
       case 'payouts':
-        if (!host.stripeConnected) return setStepError('Complete the mock payout connection to continue.');
+        if (!host.stripeConnected) return setStepError('Connect Stripe to continue.');
         break;
-      case 'review': {
-        const listingId = host.listingId || `host-${Date.now().toString(36)}`;
-        const published = updateMockHostState(host, {
-          published: true,
-          listingId,
-          publishedAt: new Date().toISOString(),
-        });
-        setHost(published);
-        navigate('/host/dashboard');
+      case 'review':
+        void handlePublish();
         return;
-      }
       default:
         break;
     }
@@ -158,13 +229,7 @@ export function HostPage() {
               <span>Email address</span>
               <input type="email" autoComplete="email" value={host.email} onChange={(event) => patchHost({ email: event.target.value })} placeholder="you@example.com" />
             </label>
-            {host.authMode === 'login' ? (
-              <label className="host-field">
-                <span>Password · demo only</span>
-                <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="Your demo password" />
-              </label>
-            ) : null}
-            <p className="host-demo-hint">Prototype account only. No account is created on a server.</p>
+            <p className="host-demo-hint">No password needed: your email signs you in, and Stripe checks your ID next.</p>
           </>
         );
 
@@ -181,14 +246,7 @@ export function HostPage() {
             </label>
             <label className="host-field"><span>Full name</span><input autoComplete="name" value={host.fullName} onChange={(event) => patchHost({ fullName: event.target.value })} placeholder="Your full name" /></label>
             <label className="host-field"><span>Phone number</span><input type="tel" autoComplete="tel" value={host.phone} onChange={(event) => patchHost({ phone: event.target.value })} placeholder="+353 85 000 0000" /></label>
-            {host.authMode === 'signup' ? (
-              <label className="host-field">
-                <span>Password · demo only</span>
-                <input type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} placeholder="At least 8 characters" />
-              </label>
-            ) : null}
             <div className="host-private-note"><ShieldCheck size={16} /> Your personal details are not shown on your public listing.</div>
-            <p className="host-demo-hint">This demo password stays in memory only and is never saved.</p>
           </>
         );
 
@@ -198,7 +256,7 @@ export function HostPage() {
             <div className="host-step-icon"><BadgeCheck size={22} /></div>
             <span className="eyebrow">Verify identity</span>
             <h1>A quick identity check.</h1>
-            <p className="host-step-intro">Choose the document you&apos;d use to verify your identity. This prototype simulates the check; don&apos;t upload or enter real ID details.</p>
+            <p className="host-step-intro">Stripe Identity checks a passport, driving licence or national ID card against a quick selfie. In test mode Stripe lets you simulate the result, so no real ID is needed.</p>
             <div className="host-choice-list">
               {(['passport', 'driving licence', 'national ID'] as const).map((document) => (
                 <button type="button" key={document} className={host.identityDocument === document ? 'host-choice selected' : 'host-choice'} onClick={() => patchHost({ identityDocument: document })} aria-pressed={host.identityDocument === document}>
@@ -206,10 +264,11 @@ export function HostPage() {
                 </button>
               ))}
             </div>
-            <button type="button" className="secondary-action host-demo-action" onClick={() => patchHost({ identityVerified: true })}>
-              <BadgeCheck size={16} /> Run demo identity check
-            </button>
-            {host.identityVerified ? <div className="host-success-note"><CheckCircle2 size={17} /> Demo identity check passed</div> : null}
+            {host.identityVerified ? <div className="host-success-note"><CheckCircle2 size={17} /> ID verified by Stripe Identity</div> : (
+              <button type="button" className="primary-action host-demo-action" onClick={handleIdentityCheck} disabled={busy}>
+                <BadgeCheck size={16} /> {busy ? 'Opening Stripe…' : 'Verify with Stripe Identity'}
+              </button>
+            )}
           </>
         );
 
@@ -299,18 +358,17 @@ export function HostPage() {
             <div className="host-step-icon"><FileText size={22} /></div>
             <span className="eyebrow">AI electricity bill reader</span>
             <h1>Find your electricity rate.</h1>
-            <p className="host-step-intro">Select a recent bill to try the demo flow. The mock reader does not upload or inspect the file.</p>
+            <p className="host-step-intro">Upload a photo of a recent bill. Our AI reads your unit rate and suggests a price that always covers your electricity.</p>
             <label className="host-photo-drop host-file-drop">
               <FileText size={24} />
               <strong>{host.billFileName || 'Choose an electricity bill'}</strong>
-              <span>PDF or image · stays on this device</span>
-              <input type="file" accept="application/pdf,image/*" onChange={(event) => patchHost({ billFileName: event.target.files?.[0]?.name ?? '', billAnalyzed: false })} />
+              <span>{busy ? 'Reading your bill…' : 'JPG, PNG or WebP photo'}</span>
+              <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => handleBillFile(event.target.files?.[0])} disabled={busy} />
             </label>
             <button type="button" className="secondary-action host-demo-action" onClick={() => patchHost({ billFileName: host.billFileName || 'sample-electricity-bill.pdf', billAnalyzed: true, electricityRateCents: 29, billConfidence: 96 })}>
-              <Sparkles size={16} /> Run demo bill reader
+              <Sparkles size={16} /> Use a sample bill instead
             </button>
-            {host.billAnalyzed ? <div className="host-analysis-result"><Sparkles size={18} /><div><strong>Demo rate found: €{(host.electricityRateCents / 100).toFixed(2)}/kWh</strong><span>{host.billConfidence}% confidence · Review before using</span></div><CheckCircle2 size={18} /></div> : null}
-            <div className="host-demo-hint">No real OCR or bill upload is performed.</div>
+            {host.billAnalyzed ? <div className="host-analysis-result"><Sparkles size={18} /><div><strong>Rate found: €{(host.electricityRateCents / 100).toFixed(2)}/kWh</strong><span>{host.billConfidence}% confidence · Review before using</span></div><CheckCircle2 size={18} /></div> : null}
           </>
         );
 
@@ -324,8 +382,8 @@ export function HostPage() {
             <p className="host-step-intro">This rate includes the KerbStop service fee. You can change your price any time.</p>
             <div className="host-price-control"><span>€</span><input aria-label="Price per kilowatt hour in cents" type="number" min="1" max="200" step="1" value={host.priceCentsPerKwh} onChange={(event) => patchHost({ priceCentsPerKwh: Number(event.target.value) })} /><strong>¢ / kWh</strong></div>
             <input className="host-price-slider" aria-label="Price per kilowatt hour slider" type="range" min="15" max="100" step="1" value={host.priceCentsPerKwh} onChange={(event) => patchHost({ priceCentsPerKwh: Number(event.target.value) })} />
-            <div className="host-price-breakdown"><span>Electricity rate from demo bill</span><strong>€{(host.electricityRateCents / 100).toFixed(2)}/kWh</strong><span>Your estimated share after platform fee</span><strong>€{(hostShareCents / 100).toFixed(2)}/kWh</strong></div>
-            <div className="host-info-note"><Sparkles size={16} /> Suggested from your demo bill: €0.37/kWh.</div>
+            <div className="host-price-breakdown"><span>Electricity rate from your bill</span><strong>€{(host.electricityRateCents / 100).toFixed(2)}/kWh</strong><span>Your estimated share after platform fee</span><strong>€{(hostShareCents / 100).toFixed(2)}/kWh</strong></div>
+            <div className="host-info-note"><Sparkles size={16} /> Drivers pay this price. You keep 88% and KerbStop keeps 12%.</div>
           </>
         );
       }
@@ -356,12 +414,13 @@ export function HostPage() {
             <div className="host-step-icon"><CreditCard size={22} /></div>
             <span className="eyebrow">Stripe Connect</span>
             <h1>Get ready for payouts.</h1>
-            <p className="host-step-intro">Hosts use Stripe Connect for payouts. This prototype simulates the connection and does not open Stripe or collect banking details.</p>
-            <div className="host-connect-card"><div className="host-connect-icon"><Wallet size={22} /></div><div><strong>{host.stripeConnected ? 'Demo payout account connected' : 'Payout account not connected'}</strong><span>{host.stripeConnected ? 'Ready for the future Stripe Connect integration.' : 'Connect a payout account before publishing.'}</span></div>{host.stripeConnected ? <CheckCircle2 size={20} /> : null}</div>
-            <button type="button" className={host.stripeConnected ? 'secondary-action host-demo-action' : 'primary-action host-demo-action'} onClick={() => patchHost({ stripeConnected: true })}>
-              {host.stripeConnected ? <><Check size={16} /> Connected in demo</> : <>Connect Stripe · demo <ArrowRight size={16} /></>}
-            </button>
-            <div className="host-demo-hint">No real Stripe account or payment details are involved.</div>
+            <p className="host-step-intro">Hosts get paid through Stripe Connect. Stripe checks your details and bank account, then pays your share after every session. In test mode, use Stripe&apos;s test details.</p>
+            <div className="host-connect-card"><div className="host-connect-icon"><Wallet size={22} /></div><div><strong>{host.stripeConnected ? 'Stripe account connected' : 'Payout account not connected'}</strong><span>{host.stripeConnected ? 'Your share of each session is paid out by Stripe.' : 'Connect a payout account before publishing.'}</span></div>{host.stripeConnected ? <CheckCircle2 size={20} /> : null}</div>
+            {host.stripeConnected ? null : (
+              <button type="button" className="primary-action host-demo-action" onClick={handleConnectStripe} disabled={busy}>
+                {busy ? 'Opening Stripe…' : <>Connect with Stripe <ArrowRight size={16} /></>}
+              </button>
+            )}
           </>
         );
 
@@ -385,7 +444,7 @@ export function HostPage() {
             </div>
             <div className="host-review-availability"><Clock3 size={16} /><span>{weekdays.filter((day) => host.availability[day]).join(', ')} · {host.availableFrom}–{host.availableUntil}</span></div>
             <div className="host-private-note"><ShieldCheck size={16} /> Public listing shows {host.area || 'your general area'} only. Exact address stays private until a booking is confirmed.</div>
-            <div className="host-demo-hint">Publishing is simulated. This listing is saved only in this browser.</div>
+            <div className="host-demo-hint">Publishing puts your charger on the driver map straight away.</div>
           </>
         );
     }
@@ -395,7 +454,7 @@ export function HostPage() {
     <div className="host-page host-wizard container">
       <div className="host-wizard-topline">
         <Link to="/" className="host-back-home">KerbStop home</Link>
-        <span className="host-demo-badge">Host setup · demo</span>
+        <span className="host-demo-badge">Host setup</span>
       </div>
 
       <div className="host-wizard-layout">
@@ -412,8 +471,8 @@ export function HostPage() {
             {stepError ? <p className="host-step-error" role="alert">{stepError}</p> : null}
             <div className="host-step-actions">
               {stepIndex > 0 ? <button type="button" className="secondary-action" onClick={goBack}><ArrowLeft size={15} /> Back</button> : <span />}
-              <button type="button" className="primary-action" onClick={continueFlow}>
-                {host.step === 'account' ? host.authMode === 'signup' ? 'Create account' : 'Save and continue' : host.step === 'review' ? 'Publish listing' : host.step === 'welcome' ? 'Let’s list your charger' : 'Continue'}
+              <button type="button" className="primary-action" onClick={continueFlow} disabled={busy}>
+                {busy ? 'Working…' : host.step === 'account' ? host.authMode === 'signup' ? 'Create account' : 'Save and continue' : host.step === 'review' ? 'Publish listing' : host.step === 'welcome' ? 'Let’s list your charger' : 'Continue'}
                 <ArrowRight size={16} />
               </button>
             </div>

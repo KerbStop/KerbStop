@@ -58,7 +58,16 @@ chargers.get("/", async (req, res) => {
 chargers.get("/:id", async (req, res) => {
   const row = await getChargerRow(req.params.id);
   if (!row) throw new ApiError("charger_not_found", `No charger with id ${req.params.id}`);
-  res.json(toCharger(row));
+  // Upcoming slots that are already held, so the front end only offers free start times.
+  const booked = await q<{ start_at: Date; end_at: Date }>(`
+    SELECT start_at, end_at FROM bookings
+    WHERE charger_id = $1 AND end_at > now()
+      AND (status IN ('reserved','charging') OR (status = 'pending_payment' AND checkout_expires_at > now()))
+    ORDER BY start_at`, [row.id]);
+  res.json({
+    ...toCharger(row),
+    bookedSlots: booked.map((b) => ({ start: new Date(b.start_at).toISOString(), end: new Date(b.end_at).toISOString() })),
+  });
 });
 
 const NewCharger = z.object({

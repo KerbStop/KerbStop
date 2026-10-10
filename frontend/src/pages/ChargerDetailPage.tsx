@@ -4,68 +4,13 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ErrorState } from '../components/ErrorState';
 import { LoadingState } from '../components/LoadingState';
 import { getMockChargerDetails } from '../data/mockChargerDetails';
-import { getChargerById } from '../lib/api';
-import { createBooking, estimateBooking } from '../lib/mockBookingService';
+import { AccountGate } from '../components/AccountGate';
+import { createBooking, getChargerById } from '../lib/api';
+import { bookableDates, estimate, formatDateKey, formatDublinTime, startTimes, windowsOn } from '../lib/slots';
 import { formatCurrencyFromCents, formatDistance, formatPricePerKwh } from '../lib/format';
 import type { Charger } from '../types';
 
 const durationChoices = [1, 2, 3];
-
-function toDateKey(date: Date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-}
-
-function getAvailableDates(charger: Charger) {
-  return Array.from({ length: 14 }, (_, offset) => {
-    const date = new Date();
-    date.setDate(date.getDate() + offset);
-    return toDateKey(date);
-  }).filter((dateKey) => {
-    const day = new Date(`${dateKey}T12:00:00`).getDay();
-    return charger.availability.some((window) => window.day === day) && getAvailableStartTimes(charger, dateKey, 1).length > 0;
-  });
-}
-
-function getAvailableStartTimes(charger: Charger, dateKey: string, durationHours: number) {
-  if (!dateKey) return [];
-
-  const day = new Date(`${dateKey}T12:00:00`).getDay();
-  const times = new Set<string>();
-  const toMinutes = (time: string) => {
-    const [hour, minute] = time.split(':').map(Number);
-    return hour * 60 + minute;
-  };
-
-  charger.availability
-    .filter((window) => window.day === day)
-    .forEach((window) => {
-      const firstStart = Math.ceil(toMinutes(window.start) / 30) * 30;
-      const lastStart = toMinutes(window.end) - durationHours * 60;
-
-      for (let minute = firstStart; minute <= lastStart; minute += 30) {
-        if (new Date(`${dateKey}T${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}:00`) <= new Date()) continue;
-        times.add(`${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`);
-      }
-    });
-
-  return [...times].sort();
-}
-
-function addHours(time: string, hours: number) {
-  const [hour, minute] = time.split(':').map(Number);
-  const endMinutes = hour * 60 + minute + hours * 60;
-  return `${String(Math.floor(endMinutes / 60)).padStart(2, '0')}:${String(endMinutes % 60).padStart(2, '0')}`;
-}
-
-function formatDateOption(dateKey: string) {
-  const date = new Date(`${dateKey}T12:00:00`);
-  const today = toDateKey(new Date());
-  const label = new Intl.DateTimeFormat('en-IE', { weekday: 'short', day: 'numeric', month: 'short' }).format(date);
-  return dateKey === today ? `Today · ${label}` : label;
-}
 
 export function ChargerDetailPage() {
   const { id } = useParams();
@@ -89,29 +34,30 @@ export function ChargerDetailPage() {
       .finally(() => setLoading(false));
   }, [id]);
 
-  const availableDates = useMemo(() => (charger ? getAvailableDates(charger) : []), [charger]);
+  const availableDates = useMemo(() => (charger ? bookableDates(charger) : []), [charger]);
   const selectedDate = availableDates.includes(date) ? date : availableDates[0] ?? '';
 
   const availableDurations = useMemo(
-    () => (charger ? durationChoices.filter((duration) => getAvailableStartTimes(charger, selectedDate, duration).length > 0) : []),
+    () => (charger ? durationChoices.filter((duration) => startTimes(charger, selectedDate, duration).length > 0) : []),
     [charger, selectedDate],
   );
   const selectedDuration = availableDurations.includes(durationHours) ? durationHours : availableDurations[0] ?? 1;
 
-  const availableStartTimes = useMemo(
-    () => (charger ? getAvailableStartTimes(charger, selectedDate, selectedDuration) : []),
+  const availableSlots = useMemo(
+    () => (charger ? startTimes(charger, selectedDate, selectedDuration) : []),
     [charger, selectedDate, selectedDuration],
   );
-  const selectedStartTime = availableStartTimes.includes(startTime) ? startTime : availableStartTimes[0] ?? '';
-
-  const endTime = selectedStartTime ? addHours(selectedStartTime, selectedDuration) : '';
-  const { energyCents, serviceFeeCents, totalCents, holdCents } = useMemo(() => {
-    if (!charger) return { energyCents: 0, serviceFeeCents: 0, totalCents: 0, holdCents: 0 };
-    return estimateBooking(charger, selectedDuration);
+  const availableStartTimes = availableSlots.map((slot) => slot.label);
+  const selectedSlot = availableSlots.find((slot) => slot.label === startTime) ?? availableSlots[0] ?? null;
+  const selectedStartTime = selectedSlot?.label ?? '';
+  const endTime = selectedSlot ? formatDublinTime(selectedSlot.end) : '';
+  const { kwh, energyCents, serviceFeeCents, totalCents, holdCents } = useMemo(() => {
+    if (!charger) return { kwh: 0, energyCents: 0, serviceFeeCents: 0, totalCents: 0, holdCents: 0 };
+    return estimate(charger, selectedDuration);
   }, [charger, selectedDuration]);
 
   const handleReserve = async () => {
-    if (!charger || !selectedDate || !selectedStartTime || !endTime) return;
+    if (!charger || !selectedSlot) return;
 
     setBookingPending(true);
     setBookingError(null);
@@ -119,17 +65,17 @@ export function ChargerDetailPage() {
     try {
       const booking = await createBooking({
         chargerId: charger.id,
-        date: selectedDate,
-        startTime: selectedStartTime,
-        endTime,
-        durationHours: selectedDuration,
-        driverEmail: 'driver@example.com',
+        start: selectedSlot.start.toISOString(),
+        end: selectedSlot.end.toISOString(),
       });
-
-      navigate(`/booking/${booking.id}`);
+      // Stripe Checkout places the hold, then sends the driver back to /booking/:id.
+      window.location.assign(booking.checkoutUrl);
     } catch (bookingFailure) {
       setBookingError(bookingFailure instanceof Error ? bookingFailure.message : 'We could not create your booking. Please try again.');
       setBookingPending(false);
+      if (bookingFailure instanceof Error && 'code' in bookingFailure && bookingFailure.code === 'slot_taken') {
+        getChargerById(charger.id).then(setCharger).catch(() => undefined);
+      }
     }
   };
 
@@ -192,11 +138,10 @@ export function ChargerDetailPage() {
           <section className="info-card">
             <h2>Availability</h2>
             {availableDates.slice(0, 5).map((dateKey) => {
-              const day = new Date(`${dateKey}T12:00:00`).getDay();
-              const windows = charger.availability.filter((window) => window.day === day);
+              const windows = windowsOn(charger, dateKey);
               return (
                 <div className="availability-row" key={dateKey}>
-                  <span>{formatDateOption(dateKey)}</span>
+                  <span>{formatDateKey(dateKey)}</span>
                   <strong>{windows.map((window) => `${window.start}–${window.end}`).join(', ')}</strong>
                 </div>
               );
@@ -214,7 +159,7 @@ export function ChargerDetailPage() {
                 </button>
                 <h2>Review your booking</h2>
                 <div className="review-charger-title">{charger.title} · {selectedDuration} {selectedDuration === 1 ? 'hour' : 'hours'}</div>
-                <div className="review-line"><span>{formatDateOption(selectedDate)}</span><strong>{selectedStartTime}–{endTime}</strong></div>
+                <div className="review-line"><span>{formatDateKey(selectedDate)}</span><strong>{selectedStartTime}–{endTime}</strong></div>
                 <div className="review-line"><span>{charger.powerKw} kW · {charger.connector}</span><strong>{formatPricePerKwh(charger.priceCentsPerKwh)}</strong></div>
                 <div className="price-breakdown">
                   <div><span>Estimated charging</span><strong>{formatCurrencyFromCents(energyCents)}</strong></div>
@@ -222,11 +167,13 @@ export function ChargerDetailPage() {
                   <div className="total-line"><span>Estimated total</span><strong>{formatCurrencyFromCents(totalCents)}</strong></div>
                   <div className="hold-line"><span>Maximum temporary hold</span><strong>{formatCurrencyFromCents(holdCents)}</strong></div>
                 </div>
-                <p className="friendly-payment-note">You&apos;ll only pay for the energy you use. Any unused hold is released after charging.</p>
-                <button type="button" className="primary-action full-width" onClick={handleReserve} disabled={bookingPending || !selectedStartTime}>
-                  {bookingPending ? 'Reserving…' : 'Reserve charger'}
-                  <ArrowRight size={16} />
-                </button>
+                <p className="friendly-payment-note">Stripe places a temporary hold on your card. You&apos;ll only pay for the energy you use, and the rest is released after charging.</p>
+                <AccountGate returnTo={`/chargers/${charger.id}`}>
+                  <button type="button" className="primary-action full-width" onClick={handleReserve} disabled={bookingPending || !selectedStartTime}>
+                    {bookingPending ? 'Opening Stripe…' : 'Reserve and pay with Stripe'}
+                    <ArrowRight size={16} />
+                  </button>
+                </AccountGate>
                 {bookingError ? <p className="booking-error" role="alert">{bookingError}</p> : null}
               </>
             ) : (
@@ -235,7 +182,7 @@ export function ChargerDetailPage() {
                 <label className="mini-field">
                   <span><CalendarDays size={15} /> Date</span>
                   <select value={selectedDate} onChange={(event) => { setDate(event.target.value); setStartTime(''); }}>
-                    {availableDates.map((dateKey) => <option key={dateKey} value={dateKey}>{formatDateOption(dateKey)}</option>)}
+                    {availableDates.map((dateKey) => <option key={dateKey} value={dateKey}>{formatDateKey(dateKey)}</option>)}
                   </select>
                 </label>
 
@@ -263,7 +210,7 @@ export function ChargerDetailPage() {
                 </fieldset>
 
                 <div className="price-breakdown">
-                  <div><span>Estimated charging · {charger.powerKw * selectedDuration} kWh</span><strong>{formatCurrencyFromCents(energyCents)}</strong></div>
+                  <div><span>Estimated charging · {Number(kwh.toFixed(1))} kWh</span><strong>{formatCurrencyFromCents(energyCents)}</strong></div>
                   <div><span>KerbStop service fee</span><strong>{formatCurrencyFromCents(serviceFeeCents)}</strong></div>
                   <div className="total-line"><span>Estimated total</span><strong>{formatCurrencyFromCents(totalCents)}</strong></div>
                   <div className="hold-line"><span>Maximum temporary hold</span><strong>{formatCurrencyFromCents(holdCents)}</strong></div>
