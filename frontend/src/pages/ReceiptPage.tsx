@@ -3,14 +3,14 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ErrorState } from '../components/ErrorState';
 import { LoadingState } from '../components/LoadingState';
+import { getBooking } from '../lib/api';
 import { formatCurrencyFromCents } from '../lib/format';
-import { getBooking, getReceipt } from '../lib/mockBookingService';
-import type { MockBookingRecord } from '../lib/mockBookingService';
+import type { Booking } from '../types';
 
 export function ReceiptPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const [booking, setBooking] = useState<MockBookingRecord | null>(null);
+  const [booking, setBooking] = useState<Booking | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -21,11 +21,10 @@ export function ReceiptPage() {
     }
 
     let mounted = true;
-    void Promise.all([getBooking(id), getReceipt(id)])
-      .then(([savedBooking, receipt]) => {
-        if (!savedBooking || !receipt) throw new Error('This receipt is not ready yet. Complete a charging session first.');
+    void getBooking(id)
+      .then((savedBooking) => {
         if (!mounted) return;
-        if (savedBooking.status !== 'completed') {
+        if (savedBooking.status !== 'completed' || !savedBooking.receipt) {
           navigate(savedBooking.status === 'charging' ? `/charging/${id}` : `/booking/${id}`, { replace: true });
           return;
         }
@@ -55,7 +54,7 @@ export function ReceiptPage() {
   if (!booking?.receipt) return <ErrorState message="This receipt is not available." />;
 
   const receipt = booking.receipt;
-  const serviceFeeCents = Math.max(receipt.totalCents - receipt.energyCents - receipt.overstayCents - receipt.noShowCents, 0);
+  const serviceFeeCents = receipt.totalCents - receipt.hostEarnsCents;
 
   return (
     <div className="receipt-page container narrow">
@@ -70,9 +69,10 @@ export function ReceiptPage() {
         </div>
 
         <div className="price-breakdown receipt-breakdown">
-          <div><span>Energy used</span><strong>{booking.kwhDelivered.toFixed(1)} kWh</strong></div>
+          <div><span>Energy used</span><strong>{booking.kwhDelivered.toFixed(2)} kWh</strong></div>
           <div><span>Energy</span><strong>{formatCurrencyFromCents(receipt.energyCents)}</strong></div>
-          <div><span>KerbStop fee</span><strong>{formatCurrencyFromCents(serviceFeeCents)}</strong></div>
+          {receipt.overstayCents > 0 ? <div><span>Overstay</span><strong>{formatCurrencyFromCents(receipt.overstayCents)}</strong></div> : null}
+          <div><span>Includes KerbStop fee</span><strong>{formatCurrencyFromCents(serviceFeeCents)}</strong></div>
           <div className="total-line"><span>Total charged</span><strong>{formatCurrencyFromCents(receipt.totalCents)}</strong></div>
           <div><span>Maximum hold</span><strong>{formatCurrencyFromCents(booking.holdCents)}</strong></div>
           <div><span>Released</span><strong>{formatCurrencyFromCents(receipt.releasedCents)}</strong></div>
@@ -80,7 +80,7 @@ export function ReceiptPage() {
 
         <div className="receipt-host-earnings">
           <ReceiptText size={16} />
-          <span>Host earned</span>
+          <span>Host earned (paid out via Stripe Connect)</span>
           <strong>{formatCurrencyFromCents(receipt.hostEarnsCents)}</strong>
         </div>
 
@@ -92,7 +92,7 @@ export function ReceiptPage() {
             Find another charger <ArrowRight size={16} />
           </Link>
         </div>
-        <p className="receipt-demo-caption">Demo receipt · No payment was processed.</p>
+        <p className="receipt-demo-caption">Stripe test mode · Captured {formatCurrencyFromCents(receipt.totalCents)} and released {formatCurrencyFromCents(receipt.releasedCents)} of the hold.</p>
       </div>
     </div>
   );

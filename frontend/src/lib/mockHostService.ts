@@ -52,6 +52,8 @@ export type MockHostState = {
   published: boolean;
   listingId: string;
   publishedAt: string | null;
+  /** The back end's host profile, created when the host connects Stripe. */
+  hostId: string;
 };
 
 const storageKey = 'kerbstop.mock-host-onboarding.v1';
@@ -96,6 +98,7 @@ export const initialMockHostState: MockHostState = {
   published: false,
   listingId: '',
   publishedAt: null,
+  hostId: '',
 };
 
 export function loadMockHostState(): MockHostState {
@@ -139,5 +142,35 @@ export function startFreshMockHostListing() {
     identityDocument: current.identityDocument,
     identityVerified: current.identityVerified,
     contactVerified: current.contactVerified,
+    hostId: current.hostId,
+    stripeConnected: current.stripeConnected,
   });
+}
+const dayNumbers: Record<HostDay, 0 | 1 | 2 | 3 | 4 | 5 | 6> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+/** Weekly windows in the back end's format (0 = Sunday), from the days and hours the host picked. */
+export function toAvailabilityWindows(state: MockHostState) {
+  return (Object.keys(state.availability) as HostDay[])
+    .filter((day) => state.availability[day])
+    .map((day) => ({ day: dayNumbers[day], start: state.availableFrom, end: state.availableUntil === '00:00' ? '24:00' : state.availableUntil }));
+}
+
+// Rough centres of Dublin areas, so a new listing lands in the right place on the map.
+const areaCentres: Record<string, [number, number]> = {
+  belfield: [53.3065, -6.2187], ucd: [53.3065, -6.2187], clonskeagh: [53.3105, -6.2335], donnybrook: [53.3216, -6.2364],
+  ranelagh: [53.3262, -6.2564], rathmines: [53.3225, -6.2652], ballsbridge: [53.3296, -6.2296], sandymount: [53.3326, -6.2178],
+  stillorgan: [53.2896, -6.1991], dundrum: [53.2925, -6.2454], milltown: [53.3104, -6.2508], booterstown: [53.3089, -6.1945],
+  blackrock: [53.3015, -6.1778], 'mount merrion': [53.2995, -6.2112], sandyford: [53.2771, -6.2179], terenure: [53.3097, -6.2833],
+  rathgar: [53.3150, -6.2730], drumcondra: [53.3700, -6.2550], phibsborough: [53.3605, -6.2730], 'dublin city': [53.3498, -6.2603],
+  'city centre': [53.3498, -6.2603], smithfield: [53.3483, -6.2779], glasnevin: [53.3720, -6.2700], clontarf: [53.3640, -6.2050],
+  howth: [53.3786, -6.0657], 'dun laoghaire': [53.2940, -6.1340], dalkey: [53.2775, -6.1000], tallaght: [53.2876, -6.3728],
+  lucan: [53.3570, -6.4490], swords: [53.4597, -6.2181], malahide: [53.4509, -6.1544], 'ringsend': [53.3412, -6.2259],
+};
+
+export function areaToLatLng(area: string): { lat: number; lng: number } {
+  const key = area.trim().toLowerCase();
+  const match = Object.entries(areaCentres).find(([name]) => key.includes(name));
+  const [lat, lng] = match ? match[1] : areaCentres.belfield;
+  // Nudge slightly so two listings in one area don't sit on the same map pin.
+  return { lat: lat + (Math.random() - 0.5) * 0.004, lng: lng + (Math.random() - 0.5) * 0.006 };
 }

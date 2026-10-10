@@ -9,6 +9,7 @@ export type Charger = {
   connector: 'Type 2' | 'CCS';
   powerKw: number;
   priceCentsPerKwh: number;
+  hostPriceCentsPerKwh?: number;
   overstayCentsPerMin: number;
   graceMinutes: number;
   availability: {
@@ -19,6 +20,7 @@ export type Charger = {
   offPeak: boolean;
   rating: number;
   distanceKm?: number;
+  bookedSlots?: { start: string; end: string }[];
 };
 
 export type BookingStatus =

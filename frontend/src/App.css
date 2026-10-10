@@ -3943,3 +3943,39 @@ a:focus-visible {
     scroll-behavior: auto !important;
   }
 }
+
+/* Sign-in and ID check before booking */
+.account-gate {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface-soft);
+}
+
+.account-gate strong {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.account-gate p,
+.account-gate-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.account-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.verify-page {
+  display: grid;
+  gap: 16px;
+  padding-top: 48px;
+}

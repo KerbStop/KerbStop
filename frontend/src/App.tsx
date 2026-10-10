@@ -11,6 +11,7 @@ import { HostDashboardPage } from './pages/HostDashboardPage';
 import { HostCalendarPage } from './pages/HostCalendarPage';
 import { HostPage } from './pages/HostPage';
 import { ReceiptPage } from './pages/ReceiptPage';
+import { VerifyPage } from './pages/VerifyPage';
 
 function App() {
   return (
@@ -24,6 +25,7 @@ function App() {
           <Route path="/booking/:id" element={<BookingPage />} />
           <Route path="/charging/:id" element={<ChargingPage />} />
           <Route path="/receipt/:id" element={<ReceiptPage />} />
+          <Route path="/verify" element={<VerifyPage />} />
           <Route path="/host" element={<HostPage />} />
           <Route path="/host/dashboard" element={<HostDashboardPage />} />
           <Route path="/host/calendar" element={<HostCalendarPage />} />
