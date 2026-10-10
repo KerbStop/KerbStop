@@ -8,59 +8,40 @@ reviewed, tested and demoed on their own.
 
 | # | Portion | Files | Status |
 | --- | --- | --- | --- |
-| 1 | Foundations: config, database schema, error format, seed data | `config.ts`, `db.ts`, `errors.ts`, `seed.ts` | Done |
+| 1 | Foundations: config, Postgres schema, error format, seed data | `config.ts`, `db.ts`, `errors.ts`, `seed.ts` | Done |
 | 2 | Charger search and listings | `routes/chargers.ts`, `availability.ts`, `slots.ts` | Done |
 | 3 | Pricing maths | `pricing.ts` | Done, matches the plan's worked example (€10.08, hold €14.19) |
-| 4 | Booking and Checkout hold | `bookingFlow.ts` (create), `payments.ts` | Done; real Stripe untested until keys are added |
-| 5 | Stripe webhook and booking states | `routes/webhooks.ts`, `bookingFlow.ts` | Done; tested through mock checkout |
+| 4 | Booking and Checkout hold | `bookingFlow.ts` (create), `payments.ts` | Done |
+| 5 | Stripe webhook and booking states | `routes/webhooks.ts`, `bookingFlow.ts` | Done |
 | 6 | Charging session: start, simulated meter, stop with partial capture | `bookingFlow.ts`, `routes/bookings.ts` | Done |
 | 7 | Hosts and Stripe Connect onboarding | `routes/hosts.ts`, `payments.ts` | Done; real onboarding untested until keys are added |
 | 8 | No-shows, expiry sweep, Radar risk levels | `bookingFlow.ts` (sweepNoShows), webhook | Done |
-| 9 | AI: bill reader and availability parser | `ai.ts`, `routes/ai.ts` | Code done; needs an OpenRouter key and a bill test set |
-| 10 | Tests, README, mock data for King | `test/`, `README.md`, `mock/chargers.json` | Done (11 tests pass) |
+| 9 | AI: bill reader and availability parser | `ai.ts`, `routes/ai.ts`, `scripts/compare-models.ts` | Code done; needs a bill test set |
+| 11 | Sign-in and ID verification | `auth.ts`, `routes/me.ts`, webhook | Done |
+| 12 | Deploy config | `render.yaml` | Ready; not deployed yet |
+| 10 | Tests, README, sample data for King | `test/`, `README.md`, `mock/chargers.json` | Done (12 tests pass) |
 
 ## Still to do
 
-- Run the loop against a real Stripe sandbox (needs `STRIPE_SECRET_KEY` and `stripe listen`).
-- Run the AI against real bills and phrases (needs `OPENROUTER_API_KEY`); build the 10–15 bill test set and compare two models.
-- Smart search (stretch) and "verified drivers only" (stretch): not started.
-- Front end: King's.
+- Sean: create the Supabase project, turn on Stripe Identity, run `npm run stripe:demo-host` (see `docs/SETUP-WINDOWS.md`).
+- Run the full loop against the real Stripe sandbox once the front end has sign-in.
+- Build the 10 to 15 bill test set and run `npm run ai:compare`.
+- Deploy to Render when Sean says go.
+- Smart search (stretch): not started. "Verified drivers only" is now always on.
+- Front end: King's, now with Supabase sign-in and the ID verification step.
 
-## Design questions for Sean
+## Decisions (from Sean, 10 Oct)
 
-Each has a default already built in, marked **(current)**. Change any you'd like.
-
-1. **Where does it run for the demo?**
-   a. Laptop only, `localhost:4000` **(current)**
-   b. Deployed (Render, Railway or Fly) so judges and King can hit a public URL
-2. **Database**
-   a. SQLite file **(current)**, simplest for a laptop demo
-   b. Hosted Postgres (Supabase or Neon), needed if we deploy with more than one instance
-3. **Repo layout**
-   a. One repo, `backend/` and `frontend/` side by side **(current)**
-   b. Separate repos for front and back end
-4. **Mock-payments mode** (runs with no Stripe key, fake checkout page)
-   a. Keep it so King can build without keys **(current)**
-   b. Remove it and always use the Stripe sandbox
-5. **Seeded chargers and host payouts.** Seeded hosts have no Stripe account, so their bookings
-   pay Kerb only and the dashboard can't show a host's share for them.
-   a. Leave as is; show host payouts with a host created live in the demo **(current)**
-   b. Create one sandbox connected account up front and attach two seeded chargers to it
-6. **Radar-blocked card.** The plan says the booking stays `pending_payment` so the driver can retry,
-   but the front-end section also polls for `blocked`.
-   a. Stay `pending_payment` with `riskLevel: "highest"`; the front end shows "card blocked, try another" **(current)**
-   b. Move it to `blocked` (driver has to start a new booking)
-7. **AI confidence format**
-   a. A number from 0 to 1 **(current)**; under 0.6 means "please check"
-   b. "high", "medium" or "low"
-8. **AI models.** Default `google/gemini-2.5-flash` for both features; the bill route takes
-   `?model=` for the comparison. Which second model do you want to compare against?
-9. **Charger defaults.** Every charger gets 10c a minute overstay after a 10-minute grace, and
-   the simulated clock runs 60× (one real minute is one charging hour). Keep, or change?
-10. **Accounts.** No login: drivers are just an email and the host dashboard is open to anyone
-    with the host id.
-    a. Fine for the hackathon **(current)**
-    b. Add a simple magic-link or Stripe-email login
-11. **Extras beyond the contract.** I added `bookings` to `GET /api/hosts/:id`, `status` to the
-    meter response, `POST /api/hosts/:id/onboarding-link` and the mock checkout page. All are
-    additive, so King's code keeps working. OK to add them to the contract in the plan?
+| # | Question | Decision |
+| --- | --- | --- |
+| 1 | Where it runs | Deployed to Render (`render.yaml`); deploy happens once Sean says go |
+| 2 | Database | Supabase Postgres |
+| 3 | Repo layout | One repo, `backend/` and `frontend/` side by side |
+| 4 | Mock payments | Removed: Stripe sandbox only |
+| 5 | Seeded hosts | One sandbox "Kerb Demo Host" Connect account receives all seeded chargers' payouts, so every demo booking is a destination charge showing the host's share and Kerb's fee |
+| 6 | Radar-blocked card | Stays `pending_payment` so the driver can retry with another card (Radar and 3D Secure screen it again); ends as `blocked` if checkout then expires. Locking out on one block would punish false positives, and Radar already stopped the money |
+| 7 | AI confidence | Number from 0 to 1; under 0.6 means "please check" |
+| 8 | Second AI model | Claude via OpenRouter (`OPENROUTER_COMPARE_MODEL`), compared with `npm run ai:compare` |
+| 9 | Charger defaults | Kept: 10c a minute overstay after 10 minutes' grace; 60× simulated clock |
+| 10 | Accounts | Supabase Auth email magic links; Stripe Identity checks a government ID plus a selfie for drivers (before booking) and hosts (before listing) |
+| 11 | Contract extras | Accepted; documented in `backend/README.md` |
