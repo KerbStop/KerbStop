@@ -1,18 +1,41 @@
 import "dotenv/config";
 
+const list = (v: string | undefined, fallback: string) =>
+  (v ?? fallback).split(",").map((s) => s.trim()).filter(Boolean);
+
 export const config = {
   port: Number(process.env.PORT ?? 4000),
-  frontendUrl: process.env.FRONTEND_URL ?? "http://localhost:3000",
-  backendUrl: process.env.BACKEND_URL ?? `http://localhost:${process.env.PORT ?? 4000}`,
-  dbPath: process.env.DB_PATH ?? "kerb.db",
+  // First entry is where Stripe sends drivers back to; all entries are allowed by CORS.
+  frontendUrls: list(process.env.FRONTEND_URL, "http://localhost:3000"),
+  get frontendUrl() {
+    return this.frontendUrls[0];
+  },
+  databaseUrl: process.env.DATABASE_URL ?? "",
   stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
+  // Sandbox connected account that receives payouts for the seeded chargers.
+  stripeDemoAccountId: process.env.STRIPE_DEMO_ACCOUNT_ID ?? "",
+  supabaseUrl: process.env.SUPABASE_URL ?? "",
+  // Only for Supabase projects still on the legacy shared JWT secret; otherwise JWKS is used.
+  supabaseJwtSecret: process.env.SUPABASE_JWT_SECRET ?? "",
   openRouterKey: process.env.OPENROUTER_API_KEY ?? "",
   openRouterModel: process.env.OPENROUTER_MODEL ?? "google/gemini-2.5-flash",
+  openRouterCompareModel: process.env.OPENROUTER_COMPARE_MODEL ?? "anthropic/claude-sonnet-4.5",
   // Simulated charger clock runs this many times faster than real time.
   demoSpeedup: Number(process.env.DEMO_SPEEDUP ?? 60),
 };
 
-// Without a Stripe key the server runs in mock-payments mode: Checkout is replaced
-// by a local test page that fakes the webhook. Lets the front end work offline.
-export const mockPayments = !config.stripeSecretKey;
+export function assertConfig() {
+  const missing = [
+    ["DATABASE_URL", config.databaseUrl],
+    ["STRIPE_SECRET_KEY", config.stripeSecretKey],
+    ["STRIPE_WEBHOOK_SECRET", config.stripeWebhookSecret],
+    ["SUPABASE_URL", config.supabaseUrl],
+  ].filter(([, v]) => !v).map(([k]) => k);
+  if (missing.length) {
+    throw new Error(`Missing environment variables: ${missing.join(", ")}. See backend/.env.example.`);
+  }
+  if (!config.stripeSecretKey.startsWith("sk_test_") && !config.stripeSecretKey.startsWith("rk_test_")) {
+    console.warn("STRIPE_SECRET_KEY is not a test key. Kerb is a hackathon demo: use the Stripe sandbox.");
+  }
+}

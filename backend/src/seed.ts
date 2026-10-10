@@ -1,5 +1,6 @@
 // Seeds the same 12 chargers around UCD and Dublin that King's mock file uses.
-import { db } from "./db.js";
+import { config } from "./config.js";
+import { one, q, tx } from "./db.js";
 import type { Window } from "./models.js";
 
 const weekdays = (start: string, end: string): Window[] =>
@@ -39,20 +40,29 @@ const chargers = [
   { id: "ch_sandyford", hostId: "host_niamh", title: "Driveway charger, Sandyford", lat: 53.2770, lng: -6.2160, area: "Sandyford", connector: "Type 2", powerKw: 7.4, price: 39, avail: weekdays("09:00", "17:00"), offPeak: false, rating: 4.1 },
 ] as const;
 
-export function seedIfEmpty() {
-  const { n } = db.prepare("SELECT COUNT(*) AS n FROM chargers").get() as { n: number };
-  if (n > 0) return;
-  const insertHost = db.prepare(`INSERT OR IGNORE INTO hosts (id, name, email, hostType) VALUES (@id, @name, @email, @hostType)`);
-  const insertCharger = db.prepare(`
-    INSERT INTO chargers (id, hostId, title, lat, lng, area, connector, powerKw, hostPriceCentsPerKwh,
-                          overstayCentsPerMin, graceMinutes, availability, offPeak, rating)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 10, 10, ?, ?, ?)`);
-  db.transaction(() => {
-    hosts.forEach((h) => insertHost.run(h));
-    for (const c of chargers) {
-      insertCharger.run(c.id, c.hostId, c.title, c.lat, c.lng, c.area, c.connector, c.powerKw, c.price,
-        JSON.stringify(c.avail), c.offPeak ? 1 : 0, c.rating);
-    }
-  })();
-  console.log(`Seeded ${hosts.length} hosts and ${chargers.length} chargers`);
+export async function seedIfEmpty() {
+  const { n } = (await one<{ n: number }>("SELECT COUNT(*)::int AS n FROM chargers"))!;
+  if (n === 0) {
+    await tx(async (db) => {
+      for (const h of hosts) {
+        await db.query(`INSERT INTO hosts (id, name, email, host_type) VALUES ($1, $2, $3, $4) ON CONFLICT DO NOTHING`,
+          [h.id, h.name, h.email, h.hostType]);
+      }
+      for (const c of chargers) {
+        await db.query(`
+          INSERT INTO chargers (id, host_id, title, lat, lng, area, connector, power_kw, host_price_cents_per_kwh,
+                                overstay_cents_per_min, grace_minutes, availability, off_peak, rating)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 10, 10, $10, $11, $12)`,
+          [c.id, c.hostId, c.title, c.lat, c.lng, c.area, c.connector, c.powerKw, c.price,
+            JSON.stringify(c.avail), c.offPeak, c.rating]);
+      }
+    });
+    console.log(`Seeded ${hosts.length} hosts and ${chargers.length} chargers`);
+  }
+  // All seeded hosts are paid through one sandbox "Kerb Demo Host" account, so every demo
+  // booking is a Connect destination charge with the host's share visible in Stripe.
+  if (config.stripeDemoAccountId) {
+    await q(`UPDATE hosts SET stripe_account_id = $1, payouts_enabled = false
+             WHERE user_id IS NULL AND stripe_account_id IS DISTINCT FROM $1`, [config.stripeDemoAccountId]);
+  }
 }

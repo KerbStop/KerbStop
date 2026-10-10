@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { z } from "zod";
-import { db, newId } from "../db.js";
+import { requireUser, requireVerified } from "../auth.js";
+import { newId, one, q } from "../db.js";
 import { ApiError } from "../errors.js";
 import { WindowSchema } from "../ai.js";
 import { allChargerRows, getChargerRow, toCharger } from "../models.js";
@@ -24,32 +25,38 @@ function distanceKm(lat1: number, lng1: number, lat2: number, lng2: number) {
   return 6371 * 2 * Math.asin(Math.sqrt(a));
 }
 
-chargers.get("/", (req, res) => {
-  const q = Search.parse(req.query);
-  if ((q.from && !q.to) || (!q.from && q.to)) throw new ApiError("invalid_input", "Pass both from and to, or neither");
-  const from = q.from ? new Date(q.from) : null;
-  const to = q.to ? new Date(q.to) : null;
+// Public: anyone can browse the map before signing in.
+chargers.get("/", async (req, res) => {
+  const query = Search.parse(req.query);
+  if ((query.from && !query.to) || (!query.from && query.to)) throw new ApiError("invalid_input", "Pass both from and to, or neither");
+  const from = query.from ? new Date(query.from) : null;
+  const to = query.to ? new Date(query.to) : null;
   if (from && to && to <= from) throw new ApiError("invalid_input", "to must be after from");
 
-  let list = allChargerRows().map((row) => {
+  let list = (await allChargerRows()).map((row) => {
     const c = toCharger(row);
-    if (q.lat !== undefined && q.lng !== undefined) {
-      c.distanceKm = Math.round(distanceKm(q.lat, q.lng, c.lat, c.lng) * 10) / 10;
+    if (query.lat !== undefined && query.lng !== undefined) {
+      c.distanceKm = Math.round(distanceKm(query.lat, query.lng, c.lat, c.lng) * 10) / 10;
     }
     return c;
   });
-  if (q.lat !== undefined && q.lng !== undefined) {
-    list = list.filter((c) => c.distanceKm! <= q.radiusKm).sort((a, b) => a.distanceKm! - b.distanceKm!);
+  if (query.lat !== undefined && query.lng !== undefined) {
+    list = list.filter((c) => c.distanceKm! <= query.radiusKm).sort((a, b) => a.distanceKm! - b.distanceKm!);
   }
   if (from && to) {
-    list = list.filter((c) => slotFitsAvailability(from, to, c.availability)
-      && !slotIsTaken(c.id, from.toISOString(), to.toISOString()));
+    const free = [];
+    for (const c of list) {
+      if (slotFitsAvailability(from, to, c.availability) && !(await slotIsTaken(c.id, from.toISOString(), to.toISOString()))) {
+        free.push(c);
+      }
+    }
+    list = free;
   }
   res.json({ chargers: list });
 });
 
-chargers.get("/:id", (req, res) => {
-  const row = getChargerRow(req.params.id);
+chargers.get("/:id", async (req, res) => {
+  const row = await getChargerRow(req.params.id);
   if (!row) throw new ApiError("charger_not_found", `No charger with id ${req.params.id}`);
   res.json(toCharger(row));
 });
@@ -69,17 +76,18 @@ const NewCharger = z.object({
   offPeak: z.boolean().default(false),
 });
 
-chargers.post("/", (req, res) => {
+// Hosts must be signed in, own the host profile, and have passed ID verification.
+chargers.post("/", requireUser, requireVerified, async (req, res) => {
   const body = NewCharger.parse(req.body);
-  const host = db.prepare("SELECT id FROM hosts WHERE id = ?").get(body.hostId);
-  if (!host) throw new ApiError("invalid_input", `No host with id ${body.hostId}`);
+  const host = await one(`SELECT id FROM hosts WHERE id = $1 AND user_id = $2`, [body.hostId, req.user!.id]);
+  if (!host) throw new ApiError("forbidden", "That host profile isn't yours");
   const id = newId("ch");
-  db.prepare(`
-    INSERT INTO chargers (id, hostId, title, lat, lng, area, connector, powerKw, hostPriceCentsPerKwh,
-                          overstayCentsPerMin, graceMinutes, availability, offPeak, rating)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`)
-    .run(id, body.hostId, body.title, body.lat, body.lng, body.area, body.connector, body.powerKw,
+  await q(`
+    INSERT INTO chargers (id, host_id, title, lat, lng, area, connector, power_kw, host_price_cents_per_kwh,
+                          overstay_cents_per_min, grace_minutes, availability, off_peak, rating)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, 0)`,
+    [id, body.hostId, body.title, body.lat, body.lng, body.area, body.connector, body.powerKw,
       body.hostPriceCentsPerKwh, body.overstayCentsPerMin, body.graceMinutes,
-      JSON.stringify(body.availability), body.offPeak ? 1 : 0);
-  res.status(201).json(toCharger(getChargerRow(id)!));
+      JSON.stringify(body.availability), body.offPeak]);
+  res.status(201).json(toCharger((await getChargerRow(id))!));
 });

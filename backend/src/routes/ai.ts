@@ -1,10 +1,12 @@
 import { Router } from "express";
 import multer from "multer";
 import { z } from "zod";
+import { requireUser } from "../auth.js";
 import { ApiError } from "../errors.js";
 import { parseAvailability, readBill } from "../ai.js";
 
 export const ai = Router();
+ai.use(requireUser); // each call costs OpenRouter credit
 
 const upload = multer({
   storage: multer.memoryStorage(),

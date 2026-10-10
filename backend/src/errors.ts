@@ -7,7 +7,11 @@ export type ErrorCode =
   | "slot_taken"
   | "booking_not_active"
   | "payment_not_confirmed"
-  | "ai_unavailable";
+  | "ai_unavailable"
+  | "unauthorized"
+  | "forbidden"
+  | "identity_required"
+  | "not_found";
 
 const STATUS: Record<ErrorCode, number> = {
   invalid_input: 400,
@@ -16,6 +20,10 @@ const STATUS: Record<ErrorCode, number> = {
   booking_not_active: 409,
   payment_not_confirmed: 402,
   ai_unavailable: 503,
+  unauthorized: 401,
+  forbidden: 403,
+  identity_required: 403,
+  not_found: 404,
 };
 
 export class ApiError extends Error {
