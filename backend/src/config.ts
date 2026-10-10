@@ -10,7 +10,9 @@ export const config = {
   get frontendUrl() {
     return this.frontendUrls[0];
   },
+  // Empty = built-in database saved in localDataDir (laptop demo). Set it to use Supabase Postgres.
   databaseUrl: process.env.DATABASE_URL ?? "",
+  localDataDir: process.env.LOCAL_DATA_DIR ?? "./.data",
   stripeSecretKey: process.env.STRIPE_SECRET_KEY ?? "",
   stripeWebhookSecret: process.env.STRIPE_WEBHOOK_SECRET ?? "",
   // Sandbox connected account that receives payouts for the seeded chargers.
@@ -27,7 +29,6 @@ export const config = {
 
 export function assertConfig() {
   const missing = [
-    ["DATABASE_URL", config.databaseUrl],
     ["STRIPE_SECRET_KEY", config.stripeSecretKey],
     ["STRIPE_WEBHOOK_SECRET", config.stripeWebhookSecret],
     ["SUPABASE_URL", config.supabaseUrl],
@@ -38,4 +39,5 @@ export function assertConfig() {
   if (!config.stripeSecretKey.startsWith("sk_test_") && !config.stripeSecretKey.startsWith("rk_test_")) {
     console.warn("STRIPE_SECRET_KEY is not a test key. Kerb is a hackathon demo: use the Stripe sandbox.");
   }
+  if (!config.databaseUrl) console.log(`No DATABASE_URL: using the built-in database in ${config.localDataDir}`);
 }

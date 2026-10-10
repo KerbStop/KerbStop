@@ -92,18 +92,15 @@ OpenRouter gives the back end access to AI models. It's used to read electricity
 
 Now **save the file in Notepad** (Ctrl+S). Leave `STRIPE_WEBHOOK_SECRET=` empty for now.
 
-## Step 6a: Create the Supabase database
+## Step 6a: Set up Supabase sign-in
 
-Supabase gives you a hosted Postgres database (where bookings, chargers and users are stored) and handles sign-in with email links.
+Supabase handles sign-in with email links. The back end only needs your project's address to check those sign-ins. (Data is stored in a built-in database on your laptop, in `backend/.data`, so there's no database to set up.)
 
-1. Go to [supabase.com](https://supabase.com), sign in with GitHub, and click **New project**. Name it `kerb`, pick region **West EU (Ireland)**, and set a database password. Save the password somewhere; you need it in a moment.
-2. Wait a minute for the project to be created.
-3. Click **Connect** at the top of the project page. Under **Session pooler**, copy the URI. It looks like `postgresql://postgres.abcd:[YOUR-PASSWORD]@aws-0-eu-west-1.pooler.supabase.com:5432/postgres`.
-4. In Notepad, paste it after `DATABASE_URL=` and replace `[YOUR-PASSWORD]` with the password from step 1 (no square brackets).
-5. Go to **Project Settings > API** (or **Data API**) and copy the **Project URL** (like `https://abcd.supabase.co`). Paste it after `SUPABASE_URL=`.
-6. Go to **Authentication > Sign In / Providers** and check **Email** is enabled. That's what sends magic links.
-
-The back end creates its tables in this database the first time it starts.
+1. Go to [supabase.com](https://supabase.com), sign in, create an organisation (Free plan), then a project named `kerb` in region **West EU (Ireland)**.
+2. Click **Connect** at the top, open the **App Frameworks** tab, and copy the URL from the `NEXT_PUBLIC_SUPABASE_URL=` line (like `https://abcd.supabase.co`).
+3. In Notepad, paste it after `SUPABASE_URL=`. Leave `DATABASE_URL=` empty.
+4. Give King both `NEXT_PUBLIC_SUPABASE_...` lines for the front end.
+5. Go to **Authentication > Sign In / Providers** and check **Email** is enabled.
 
 ## Step 6b: Turn on Stripe Identity
 
@@ -183,7 +180,6 @@ Booking now needs a signed-in, ID-verified user, which comes from King's front e
 | `'node' is not recognized` | Node isn't installed, or the terminal opened before you installed it | Install Node (Step 1), then reopen the terminal |
 | `EADDRINUSE :::4000` | The back end is already running in another window | Close the other window, or press Ctrl+C there |
 | `Missing environment variables: ...` | Those lines in `.env` are empty | Fill them in, save, restart `npm run dev` |
-| `password authentication failed` or `ENOTFOUND` | The Supabase `DATABASE_URL` is wrong | Copy the Session pooler URI again and replace `[YOUR-PASSWORD]` with your database password, without brackets |
 | `unauthorized` from the API | No sign-in token, or it expired | Sign in again on the front end |
 | `identity_required` from the API | The user hasn't passed ID verification | Do the Stripe Identity step on the front end |
 | Booking stays `pending_payment` after paying | The webhook isn't arriving | Check terminal 2 is running and `STRIPE_WEBHOOK_SECRET` matches what it printed; restart terminal 1 |
