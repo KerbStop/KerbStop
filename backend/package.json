@@ -6,7 +6,7 @@
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test test/*.test.ts",
-    "stripe:listen": "stripe listen --forward-to localhost:4000/api/webhooks/stripe"
+    "stripe:listen": "stripe listen --events checkout.session.completed,checkout.session.expired,payment_intent.payment_failed,payment_intent.canceled --forward-to localhost:4000/api/webhooks/stripe"
   },
   "dependencies": {
     "better-sqlite3": "^13.0.3",
